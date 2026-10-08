@@ -32,6 +32,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);fo
 header{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:12px}
 h1{font-family:var(--f-display);font-weight:400;font-size:clamp(24px,4vw,32px);line-height:1.15;margin:0;text-wrap:balance}
 h2{font-family:var(--f-display);font-weight:400;font-size:20px;margin:0;text-wrap:balance}
+.ver{font-family:var(--f-mono);font-size:12px;font-weight:500;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:2px 10px;vertical-align:middle;white-space:nowrap}
 .sub{color:var(--muted);margin:4px 0 0;font-size:14px}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
@@ -109,7 +110,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px}
 <div class="wrap">
   <header>
     <div>
-      <h1>유튜브 받아쓰기 랩</h1>
+      <h1>유튜브 받아쓰기 랩 <span class="ver" id="ver"></span></h1>
       <p class="sub" id="videoTitle">유튜브 영상을 문장 단위로 끊어 듣고 받아쓰기</p>
     </div>
     <button id="changeBtn" hidden>영상 바꾸기</button>
@@ -220,6 +221,11 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px}
 </div>
 
 <script>
+/* ================= version ================= */
+const VERSION = "v1.3";          // v1.0 첫 버전 · v1.1 번역·반복 횟수 · v1.2 노래/효과음 자막 · v1.3 시간 붙은 스크립트·챕터
+const VERSION_DATE = "2026-10-07";
+document.getElementById("ver").textContent = VERSION + " · " + VERSION_DATE;
+
 /* ================= utilities ================= */
 const $ = id => document.getElementById(id);
 const store = {
@@ -363,7 +369,10 @@ $("loadBtn").onclick = ()=>{
   err.hidden=true;
   if(!id){ err.textContent="유튜브 주소를 확인해 주세요. watch?v=… 또는 youtu.be/… 형식이어야 해요."; err.hidden=false; return; }
   const cues = parseTranscript(raw);
-  if(cues.length<2){ err.textContent="스크립트에서 시간(예: 0:03)을 찾지 못했어요. 스크립트 패널에서 시간이 보이는 상태로 복사해 주세요."; err.hidden=false; return; }
+  if(cues.length<2){
+    const first = raw.split("\n").map(l=>l.trim()).filter(Boolean).slice(0,2).join(" / ").slice(0,90);
+    err.textContent=`스크립트에서 시간(예: 0:03)을 ${cues.length}개만 찾았어요. 스크립트 패널에서 시간이 보이는 상태로 복사해 주세요. (${VERSION} · 받은 첫 줄: "${first}")`;
+    err.hidden=false; return; }
   const old = store.get("yl_v_"+id,null);
   start({ id, title: old?.title||"", raw, mode: hasPunct(cues)?"sentence":"line", adj:{}, merges:[], scores: old && old.raw===raw ? old.scores : {} });
 };
