@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>유튜브 받아쓰기 랩</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: player + dictation column on the left, segment list on the right; stacks to one column on phones */
+:root{
+  --bg:#eef1f4; --surface:#ffffff; --ink:#18212b; --muted:#5d6977; --line:#d5dbe2;
+  --accent:#1f5fae; --accent-soft:#e2ecf8; --signal:#c46a10;
+  --ok:#1d7a4a; --ok-soft:#dff2e7; --bad:#b3362c; --bad-soft:#f8e3e0; --miss:#8a6d12; --miss-soft:#f6efd6;
+  --f-display:"Young Serif",Georgia,serif;
+  --f-body:"IBM Plex Sans KR",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#11161c; --surface:#19212a; --ink:#e6ebf0; --muted:#94a1af; --line:#2c3743;
+  --accent:#6ea6ec; --accent-soft:#1d2d42; --signal:#e9a050;
+  --ok:#5cc58c; --ok-soft:#163023; --bad:#f08a80; --bad-soft:#3a1d1a; --miss:#e0c060; --miss-soft:#332c12; color-scheme:dark}}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6;
+  padding-inline:max(16px, env(safe-area-inset-left));padding-block:max(20px, env(safe-area-inset-top)) 48px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:20px;grid-template-columns:minmax(0,1fr) 340px}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+header{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:12px}
+h1{font-family:var(--f-display);font-weight:400;font-size:clamp(24px,4vw,32px);line-height:1.15;margin:0;text-wrap:balance}
+h2{font-family:var(--f-display);font-weight:400;font-size:20px;margin:0;text-wrap:balance}
+.sub{color:var(--muted);margin:4px 0 0;font-size:14px}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
+.stack{display:flex;flex-direction:column;gap:14px;min-width:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;font-size:14px;font-weight:500}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+button.primary:hover{filter:brightness(1.08)}
+button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+button.small{padding:4px 10px;font-size:13px}
+button:disabled{opacity:.45;cursor:not-allowed}
+.kbd{font-family:var(--f-mono);font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:6px}
+button.primary .kbd{color:inherit;border-color:currentColor;opacity:.75}
+input[type=text],textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;width:100%}
+textarea{min-height:180px;resize:vertical;font-family:var(--f-mono);font-size:13px;line-height:1.5}
+
+/* setup */
+.steps{margin:0;padding-left:20px;color:var(--muted);font-size:14px}
+.steps b{color:var(--ink);font-weight:600}
+.msg{border-radius:8px;padding:10px 12px;font-size:14px}
+.msg.err{background:var(--bad-soft);color:var(--bad)}
+.msg.info{background:var(--accent-soft);color:var(--accent)}
+.recent{display:flex;flex-direction:column;gap:6px}
+.recent button{text-align:left;display:flex;justify-content:space-between;gap:10px}
+.recent small{font-family:var(--f-mono);color:var(--muted);font-size:12px;white-space:nowrap}
+.recent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+/* player */
+.video{position:relative;width:100%;max-width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden}
+.video iframe,#player{position:absolute;inset:0;width:100%;height:100%;border:0}
+.cover{position:absolute;inset:0;background:var(--surface);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:var(--muted);font-size:14px;cursor:pointer}
+.cover b{font-family:var(--f-display);font-weight:400;font-size:22px;color:var(--ink)}
+.bar{position:relative;height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);width:0}
+.speeds button{min-width:3.6em}
+
+/* dictation */
+#answer{font-size:17px;padding:12px 14px;font-family:var(--f-body)}
+.hint{font-family:var(--f-mono);font-size:14px;color:var(--muted);word-break:break-word}
+.result{font-family:var(--f-display);font-size:20px;line-height:1.9;word-break:break-word}
+.w{padding:1px 4px;border-radius:4px}
+.w.ok{color:var(--ok);background:var(--ok-soft)}
+.w.bad{color:var(--bad);background:var(--bad-soft);text-decoration:line-through;text-decoration-thickness:1px}
+.w.miss{color:var(--miss);background:var(--miss-soft);border-bottom:2px dashed var(--miss)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted)}
+.score{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.score b{font-family:var(--f-display);font-weight:400;font-size:32px;font-variant-numeric:tabular-nums}
+
+/* segment list */
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:min(70vh,720px);overflow-y:auto}
+.list li button{width:100%;text-align:left;border:1px solid transparent;background:none;display:grid;grid-template-columns:3.4em minmax(0,1fr) 3em;gap:8px;align-items:baseline;padding:6px 8px;font-weight:400}
+.list li button:hover{border-color:var(--line)}
+.list li.cur button{background:var(--accent-soft);border-color:var(--accent)}
+.list .t{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.list .tx{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .tx.hide{color:var(--muted);font-style:italic}
+.list .p{font-family:var(--f-mono);font-size:12px;text-align:right}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stats div{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:18px}
+.stats span{display:block;font-family:var(--f-body);font-size:11px;color:var(--muted)}
+.nudge{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+details summary{cursor:pointer;color:var(--muted);font-size:13px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>유튜브 받아쓰기 랩</h1>
+      <p class="sub" id="videoTitle">유튜브 영상을 문장 단위로 끊어 듣고 받아쓰기</p>
+    </div>
+    <button id="changeBtn" hidden>영상 바꾸기</button>
+  </header>
+
+  <!-- ===== SETUP ===== -->
+  <section class="panel stack" id="setup" style="grid-column:1/-1">
+    <h2>영상과 스크립트 불러오기</h2>
+    <ol class="steps">
+      <li>유튜브에서 연습할 영상을 열고 <b>주소를 복사</b>해 아래 첫 칸에 붙여 넣으세요.</li>
+      <li>영상 설명란의 <b>더보기 → 스크립트 표시</b>를 누르세요. (모바일 앱은 설명란 아래 '스크립트')</li>
+      <li>오른쪽에 뜬 스크립트를 <b>처음부터 끝까지 드래그해 복사</b>한 뒤 두 번째 칸에 붙여 넣으세요. 시간(0:03 같은 숫자)이 같이 들어가야 해요.</li>
+    </ol>
+    <label class="label" for="url">유튜브 주소</label>
+    <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+    <label class="label" for="script">스크립트 (시간 포함)</label>
+    <textarea id="script" placeholder="0:00&#10;Today we're going to talk about&#10;0:03&#10;how neural networks learn..."></textarea>
+    <div class="row">
+      <button class="primary" id="loadBtn">연습 시작</button>
+      <span class="muted" style="font-size:13px">자막(.srt, .vtt) 내용을 붙여 넣어도 돼요.</span>
+    </div>
+    <div class="msg err" id="setupErr" hidden></div>
+    <div class="stack" id="recentBox" hidden>
+      <span class="label">최근 연습한 영상</span>
+      <div class="recent" id="recent"></div>
+    </div>
+  </section>
+
+  <!-- ===== PRACTICE ===== -->
+  <main class="stack" id="practice" hidden>
+    <section class="panel stack">
+      <div class="video">
+        <div id="player"></div>
+        <div class="cover" id="cover" hidden><b>화면 가림</b>소리에만 집중하세요 · 눌러서 보기</div>
+      </div>
+      <div class="msg err" id="playerErr" hidden></div>
+      <div class="row" style="justify-content:space-between">
+        <span class="mono muted" id="pos">문장 1 / 1</span>
+        <span class="mono muted" id="range">0:00 – 0:00</span>
+      </div>
+      <div class="bar" aria-hidden="true"><i id="prog"></i></div>
+      <div class="row">
+        <button class="primary" id="play">▶ 이 문장 듣기<span class="kbd">Esc</span></button>
+        <button id="loop">반복 끄기</button>
+        <button id="coverBtn">화면 가리기</button>
+      </div>
+      <div class="row speeds" id="speeds">
+        <span class="label" style="margin-right:4px">속도</span>
+      </div>
+      <details>
+        <summary>구간이 잘리거나 늦게 시작하면 조정하세요</summary>
+        <div class="nudge" style="margin-top:8px">
+          시작 <button class="small" data-n="s,-0.5">−0.5초</button><button class="small" data-n="s,0.5">+0.5초</button>
+          &nbsp; 끝 <button class="small" data-n="e,-0.5">−0.5초</button><button class="small" data-n="e,0.5">+0.5초</button>
+          &nbsp; <button class="small" id="mergeNext">다음 문장과 합치기</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel stack">
+      <label class="label" for="answer">들은 문장을 입력하세요</label>
+      <input type="text" id="answer" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Type what you hear…">
+      <div class="hint" id="hint" hidden></div>
+      <div class="row">
+        <button class="primary" id="check">채점<span class="kbd">Enter</span></button>
+        <button id="hintBtn">힌트</button>
+        <button id="reveal">정답 보기</button>
+        <button id="prev">← 이전<span class="kbd">Alt+↑</span></button>
+        <button id="next">다음 →<span class="kbd">Alt+↓</span></button>
+      </div>
+      <div id="out" class="stack" hidden>
+        <div class="score"><b id="pct">0%</b><span class="mono muted" id="pctDetail"></span></div>
+        <div class="result" id="result"></div>
+        <div class="legend">
+          <span><span class="w ok">맞음</span></span>
+          <span><span class="w bad">틀림</span> 내가 쓴 단어</span>
+          <span><span class="w miss">놓침</span> 못 들은 단어</span>
+        </div>
+        <p class="muted" style="margin:0;font-size:13px">놓친 단어 부분을 0.75×로 몇 번 더 듣고, 정답을 보면서 소리 내어 따라 말해 보세요. 한 번 더 들으면 정답 Enter로 다음 문장.</p>
+      </div>
+    </section>
+  </main>
+
+  <aside class="stack" id="side" hidden>
+    <section class="panel stack">
+      <div class="stats">
+        <div id="sDone">0<span>푼 문장</span></div>
+        <div id="sAvg">–<span>평균</span></div>
+        <div id="sWeak">0<span>80% 미만</span></div>
+      </div>
+      <div class="row">
+        <button class="small" id="mode"></button>
+        <button class="small" id="weakOnly">80% 미만만</button>
+      </div>
+    </section>
+    <section class="panel stack" style="padding:12px">
+      <span class="label" style="padding:4px 8px 0">문장 목록 · 푼 문장만 내용이 보여요</span>
+      <ul class="list" id="list"></ul>
+    </section>
+  </aside>
+</div>
+
+<script>
+/* ================= utilities ================= */
+const $ = id => document.getElementById(id);
+const store = {
+  get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+};
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = t => { t=Math.max(0,Math.floor(t)); const h=Math.floor(t/3600), m=Math.floor(t%3600/60), s=t%60;
+  return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(s).padStart(2,"0"); };
+
+function videoIdFrom(s){
+  s = s.trim();
+  if(/^[\w-]{11}$/.test(s)) return s;
+  const m = s.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+/* ================= transcript parsing ================= */
+const TS = /^((?:\d{1,2}:)?\d{1,2}:\d{2})$/;
+const TS_INLINE = /^((?:\d{1,2}:)?\d{1,2}:\d{2})\s+(.+)$/;
+const DURATION_LINE = /^(\d+\s*(hours?|minutes?|seconds?|시간|분|초),?\s*)+$/i;
+const toSec = s => s.split(":").map(Number).reduce((a,b)=>a*60+b,0);
+const cleanText = t => t.replace(/\[[^\]]*\]|\([^)]*(music|applause|laughter|음악|박수|웃음)[^)]*\)/gi," ")
+  .replace(/>>|♪|&gt;&gt;/g," ").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
+
+function parseTranscript(raw){
+  raw = raw.replace(/\r/g,"").replace(/ /g," ");
+  let cues = [];
+  if(/-->/.test(raw)){                       // SRT / VTT
+    raw.split(/\n\s*\n/).forEach(block=>{
+      const lines = block.split("\n"); const i = lines.findIndex(l=>l.includes("-->"));
+      if(i<0) return;
+      const [a,b] = lines[i].split("-->").map(x=>x.trim().split(/\s/)[0].replace(",","."));
+      const sec = x => { const p=x.split(":").map(parseFloat); return p.reduce((acc,v)=>acc*60+v,0); };
+      cues.push({ start:sec(a), end:sec(b), text:cleanText(lines.slice(i+1).join(" ")) });
+    });
+  } else {                                    // YouTube "Show transcript" copy
+    let cur = null;
+    raw.split("\n").map(l=>l.trim()).filter(Boolean).forEach(l=>{
+      if(TS.test(l)){ cur={start:toSec(l),text:""}; cues.push(cur); return; }
+      const m = l.match(TS_INLINE);
+      if(m){ cur={start:toSec(m[1]),text:m[2]}; cues.push(cur); return; }
+      if(DURATION_LINE.test(l) || !cur) return;
+      cur.text += " " + l;
+    });
+    cues.forEach(c=>c.text=cleanText(c.text));
+  }
+  cues = cues.filter(c=>c.text && /[a-z]/i.test(c.text)).sort((a,b)=>a.start-b.start);
+  cues.forEach((c,i)=>{
+    if(c.end==null) c.end = cues[i+1] ? cues[i+1].start : c.start + 1.5 + c.text.split(" ").length*0.35;
+  });
+  return cues;
+}
+
+const ABBR = /\b(mr|mrs|ms|dr|st|vs|etc|e\.g|i\.e|u\.s|u\.k|no|prof|inc|jr|sr)\.$/i;
+function buildSegments(cues, mode){
+  if(mode==="line") return cues.map(c=>({start:c.start,end:c.end,text:c.text}));
+  const segs=[]; let buf="", s0=null, lastEnd=0;
+  cues.forEach(c=>{
+    const pieces = c.text.match(/[^.?!]+[.?!]+["'”’)\]]*|[^.?!]+$/g) || [c.text];
+    const len = c.text.length || 1, dur = c.end - c.start; let pos = 0;
+    pieces.forEach(p=>{
+      const pStart = c.start + dur*(pos/len); pos += p.length;
+      const pEnd = c.start + dur*Math.min(1,pos/len);
+      const t = p.trim(); if(!t) return;
+      if(s0===null) s0 = pStart;
+      buf += (buf?" ":"") + t;
+      if(/[.?!]["'”’)\]]*$/.test(t) && !ABBR.test(t)){ segs.push({start:s0,end:pEnd,text:buf}); buf=""; s0=null; }
+    });
+    lastEnd = c.end;
+  });
+  if(buf) segs.push({start:s0,end:lastEnd,text:buf});
+  // fold tiny fragments ("Okay.") into the next sentence
+  for(let i=segs.length-2;i>=0;i--){
+    if(segs[i].text.split(" ").length<3){ segs[i+1].start=segs[i].start; segs[i+1].text=segs[i].text+" "+segs[i+1].text; segs.splice(i,1); }
+  }
+  return segs;
+}
+const hasPunct = cues => cues.filter(c=>/[.?!]/.test(c.text)).length / Math.max(1,cues.length) > 0.3;
+
+/* ================= answer comparison ================= */
+const NUM = {zero:"0",one:"1",two:"2",three:"3",four:"4",five:"5",six:"6",seven:"7",eight:"8",nine:"9",ten:"10"};
+const norm = s => s.toLowerCase().replace(/[’‘]/g,"'").replace(/[^a-z0-9'\s-]/g," ").replace(/-/g," ")
+  .split(/\s+/).filter(Boolean).map(w=>NUM[w]||w);
+const display = s => s.replace(/[—–]/g," ").replace(/-/g," ").split(/\s+/).filter(w=>/[a-z0-9]/i.test(w));
+function diff(target, typed){
+  const T=norm(target), Y=norm(typed), shown=display(target);
+  const n=T.length, m=Y.length, dp=Array.from({length:n+1},()=>new Array(m+1).fill(0));
+  for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--) dp[i][j] = T[i]===Y[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j],dp[i][j+1]);
+  const out=[]; let i=0,j=0;
+  while(i<n||j<m){
+    if(i<n&&j<m&&T[i]===Y[j]){ out.push({t:"ok",w:shown[i]??T[i]}); i++; j++; }
+    else if(j<m&&(i>=n||dp[i][j+1]>=dp[i+1][j])){ out.push({t:"bad",w:Y[j]}); j++; }
+    else { out.push({t:"miss",w:shown[i]??T[i]}); i++; }
+  }
+  const correct=out.filter(x=>x.t==="ok").length, extra=out.filter(x=>x.t==="bad").length;
+  return { out, correct, total:n, extra, pct:n?Math.max(0,Math.round(100*(correct-extra*0.25)/n)):0 };
+}
+
+/* ================= state ================= */
+let S = null;          // {id,title,raw,mode,adj:{},scores:{}}
+let segs = [], idx = 0, checked = false, hintLevel = 0, weakOnly = false;
+let player = null, apiReady = false, pendingId = null;
+let loopOn = store.get("yl_loop", false), rate = store.get("yl_rate", 1), covered = false;
+let segEnd = null, segStart = 0, ticker = null, loopTimer = null;
+
+function save(){ if(!S) return; store.set("yl_v_"+S.id, S);
+  const r = store.get("yl_recent",[]).filter(x=>x.id!==S.id); r.unshift({id:S.id,title:S.title||S.id,at:Date.now()}); store.set("yl_recent", r.slice(0,12)); }
+
+function rebuild(){
+  const cues = parseTranscript(S.raw);
+  segs = buildSegments(cues, S.mode);
+  // apply merges and nudges
+  (S.merges||[]).slice().sort((a,b)=>b-a).forEach(i=>{ if(segs[i+1]){ segs[i].end=segs[i+1].end; segs[i].text+=" "+segs[i+1].text; segs.splice(i+1,1);} });
+  segs.forEach((s,i)=>{ const a=S.adj[i]; if(a){ s.start=Math.max(0,s.start+a[0]); s.end+=a[1]; } });
+}
+
+/* ================= setup ================= */
+function showSetup(){
+  $("setup").hidden=false; $("practice").hidden=true; $("side").hidden=true; $("changeBtn").hidden=true;
+  const r = store.get("yl_recent",[]);
+  $("recentBox").hidden = !r.length;
+  $("recent").innerHTML = r.map(x=>{ const d=store.get("yl_v_"+x.id,null); const n=d?Object.keys(d.scores||{}).length:0;
+    return `<button data-id="${esc(x.id)}"><span>${esc(x.title)}</span><small>${n}문장 풀이</small></button>`; }).join("");
+  $("recent").querySelectorAll("button").forEach(b=>b.onclick=()=>{ const d=store.get("yl_v_"+b.dataset.id,null); if(d) start(d); });
+}
+$("loadBtn").onclick = ()=>{
+  const id = videoIdFrom($("url").value), raw = $("script").value, err=$("setupErr");
+  err.hidden=true;
+  if(!id){ err.textContent="유튜브 주소를 확인해 주세요. watch?v=… 또는 youtu.be/… 형식이어야 해요."; err.hidden=false; return; }
+  const cues = parseTranscript(raw);
+  if(cues.length<2){ err.textContent="스크립트에서 시간(예: 0:03)을 찾지 못했어요. 스크립트 패널에서 시간이 보이는 상태로 복사해 주세요."; err.hidden=false; return; }
+  const old = store.get("yl_v_"+id,null);
+  start({ id, title: old?.title||"", raw, mode: hasPunct(cues)?"sentence":"line", adj:{}, merges:[], scores: old && old.raw===raw ? old.scores : {} });
+};
+$("changeBtn").onclick = ()=>{ stopSeg(); if(player&&player.pauseVideo) player.pauseVideo(); $("url").value=""; $("script").value=""; showSetup(); };
+
+function start(data){
+  S = data; S.adj = S.adj||{}; S.merges=S.merges||[]; S.scores=S.scores||{};
+  rebuild(); save();
+  $("setup").hidden=true; $("practice").hidden=false; $("side").hidden=false; $("changeBtn").hidden=false;
+  $("videoTitle").textContent = S.title || "영상 불러오는 중…";
+  const firstOpen = segs.findIndex((_,i)=>S.scores[i]==null);
+  idx = firstOpen<0?0:firstOpen;
+  loadVideo(S.id); renderList(); show(); renderMode();
+}
+
+/* ================= YouTube player ================= */
+window.onYouTubeIframeAPIReady = () => { apiReady = true; if(pendingId) loadVideo(pendingId); };
+function loadVideo(id){
+  $("playerErr").hidden = true;
+  if(location.protocol==="file:"){ playerError("이 파일을 컴퓨터에서 바로 열면 유튜브가 재생을 막아요. GitHub Pages 같은 웹 주소에 올려서 열어 주세요."); }
+  if(!apiReady){ pendingId=id; return; }
+  if(player && player.cueVideoById){ player.cueVideoById(id); return; }
+  player = new YT.Player("player",{
+    videoId:id,
+    playerVars:{ rel:0, playsinline:1, cc_load_policy:0, iv_load_policy:3, modestbranding:1, origin:location.origin },
+    events:{
+      onReady:()=>{ try{ player.unloadModule("captions"); }catch(e){} applyRate(); },
+      onStateChange:e=>{
+        if(e.data===YT.PlayerState.PLAYING || e.data===YT.PlayerState.CUED){
+          const t = player.getVideoData && player.getVideoData().title;
+          if(t && S && S.title!==t){ S.title=t; $("videoTitle").textContent=t; save(); }
+          try{ player.unloadModule("captions"); }catch(err){}
+        }
+      },
+      onError:e=>{
+        const m = {2:"영상 주소가 올바르지 않아요.",5:"이 브라우저에서 재생할 수 없는 영상이에요.",100:"영상이 삭제되었거나 비공개예요.",
+          101:"영상 주인이 다른 사이트에서의 재생을 막아 두었어요. 다른 영상을 골라 주세요.",150:"영상 주인이 다른 사이트에서의 재생을 막아 두었어요. 다른 영상을 골라 주세요.",
+          152:"웹 주소(https://…)에서 열어야 재생돼요. GitHub Pages에 올린 주소로 열어 주세요.",153:"웹 주소(https://…)에서 열어야 재생돼요. GitHub Pages에 올린 주소로 열어 주세요."}[e.data];
+        playerError(m || "영상을 불러오지 못했어요 (오류 "+e.data+").");
+      }
+    }
+  });
+}
+function playerError(m){ $("playerErr").textContent=m; $("playerErr").hidden=false; }
+
+function applyRate(){
+  if(player && player.setPlaybackRate) player.setPlaybackRate(rate);
+  $("speeds").querySelectorAll("button").forEach(b=>b.classList.toggle("on", parseFloat(b.dataset.r)===rate));
+}
+[0.5,0.75,1,1.25].forEach(r=>{
+  const b=document.createElement("button"); b.className="small"; b.dataset.r=r; b.textContent=r+"×";
+  b.onclick=()=>{ rate=r; store.set("yl_rate",r); applyRate(); }; $("speeds").appendChild(b);
+});
+applyRate();
+
+function playSeg(){
+  if(!player || !player.seekTo || !segs[idx]) return;
+  clearTimeout(loopTimer);
+  const s = segs[idx];
+  segStart = Math.max(0, s.start - 0.15); segEnd = s.end + 0.25;
+  player.seekTo(segStart, true); player.playVideo(); applyRate();
+  clearInterval(ticker);
+  ticker = setInterval(()=>{
+    const t = player.getCurrentTime ? player.getCurrentTime() : 0;
+    $("prog").style.width = Math.min(100, Math.max(0,(t-segStart)/(segEnd-segStart)*100))+"%";
+    if(t >= segEnd){
+      player.pauseVideo(); clearInterval(ticker);
+      if(loopOn) loopTimer = setTimeout(playSeg, 900);
+    }
+  }, 40);
+}
+function stopSeg(){ clearInterval(ticker); clearTimeout(loopTimer); $("prog").style.width="0"; }
+
+/* ================= practice UI ================= */
+function show(){
+  stopSeg();
+  const s = segs[idx];
+  $("pos").textContent = `문장 ${idx+1} / ${segs.length}`;
+  $("range").textContent = `${fmt(s.start)} – ${fmt(s.end)}`;
+  $("answer").value=""; $("out").hidden=true; $("hint").hidden=true; hintLevel=0; checked=false;
+  if(S.scores[idx]!=null){ /* already done: show previous result quietly */ }
+  $("prev").disabled = idx===0; $("next").disabled = idx===segs.length-1;
+  markList();
+  $("answer").focus({preventScroll:true});
+}
+function check(){
+  const r = diff(segs[idx].text, $("answer").value);
+  $("result").innerHTML = r.out.map(x=>`<span class="w ${x.t}">${esc(x.w)}</span>`).join(" ");
+  $("pct").textContent = r.pct+"%";
+  $("pct").style.color = r.pct>=90?"var(--ok)":r.pct>=60?"var(--signal)":"var(--bad)";
+  $("pctDetail").textContent = `${r.correct}/${r.total} 단어 · 잘못 쓴 단어 ${r.extra}`;
+  $("out").hidden=false; checked=true;
+  S.scores[idx] = r.pct; save(); renderList();
+}
+function reveal(){
+  $("result").textContent = segs[idx].text;
+  $("pct").textContent = "정답"; $("pct").style.color="var(--muted)";
+  $("pctDetail").textContent = "정답을 본 문장은 0%로 기록돼요";
+  $("out").hidden=false; checked=true;
+  S.scores[idx]=0; save(); renderList();
+}
+function hint(){
+  const words = display(segs[idx].text);
+  hintLevel = Math.min(hintLevel+1,3);
+  const h = hintLevel===1 ? `단어 ${words.length}개 · 첫 단어 "${words[0]}"`
+          : hintLevel===2 ? words.map(w=>w[0]+"_".repeat(Math.max(0,w.replace(/[^\w']/g,"").length-1))).join(" ")
+          : words.map((w,i)=>i%2?"____":w).join(" ");
+  $("hint").textContent=h; $("hint").hidden=false;
+}
+function go(d){
+  let n = idx;
+  do { n += d; } while(weakOnly && segs[n] && !(S.scores[n]!=null && S.scores[n]<80));
+  if(!segs[n]) return;
+  idx=n; show(); playSeg();
+}
+function jump(i){ idx=i; show(); playSeg(); }
+
+function renderList(){
+  const vals = Object.values(S.scores);
+  $("sDone").firstChild.nodeValue = vals.length;
+  $("sAvg").firstChild.nodeValue = vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length)+"%" : "–";
+  $("sWeak").firstChild.nodeValue = vals.filter(v=>v<80).length;
+  $("list").innerHTML = segs.map((s,i)=>{
+    const p=S.scores[i], done=p!=null;
+    const col = !done?"var(--muted)":p>=90?"var(--ok)":p>=60?"var(--signal)":"var(--bad)";
+    const hide = weakOnly && !(done && p<80);
+    return `<li data-i="${i}"${hide?" hidden":""}><button><span class="t">${fmt(s.start)}</span><span class="tx${done?"":" hide"}">${done?esc(s.text):s.text.split(" ").length+"단어"}</span><span class="p" style="color:${col}">${done?p+"%":"·"}</span></button></li>`;
+  }).join("");
+  $("list").querySelectorAll("li").forEach(li=>li.querySelector("button").onclick=()=>jump(+li.dataset.i));
+  markList();
+}
+function markList(){
+  $("list").querySelectorAll("li").forEach(li=>li.classList.toggle("cur", +li.dataset.i===idx));
+  const cur = $("list").querySelector("li.cur"); if(cur) cur.scrollIntoView({block:"nearest"});
+}
+function renderMode(){ $("mode").textContent = S.mode==="sentence" ? "나누기: 문장 단위" : "나누기: 자막 줄 단위"; }
+
+/* ================= events ================= */
+$("play").onclick = playSeg;
+$("check").onclick = check;
+$("reveal").onclick = reveal;
+$("hintBtn").onclick = hint;
+$("prev").onclick = ()=>go(-1);
+$("next").onclick = ()=>go(1);
+function renderLoop(){ $("loop").textContent = loopOn ? "반복 켜짐" : "반복 끄기"; $("loop").classList.toggle("on",loopOn); }
+$("loop").onclick = ()=>{ loopOn=!loopOn; store.set("yl_loop",loopOn); renderLoop(); if(!loopOn) clearTimeout(loopTimer); };
+renderLoop();
+function setCover(v){ covered=v; $("cover").hidden=!v; $("coverBtn").classList.toggle("on",v); $("coverBtn").textContent=v?"화면 보이기":"화면 가리기"; }
+$("coverBtn").onclick = ()=>setCover(!covered);
+$("cover").onclick = ()=>setCover(false);
+$("mode").onclick = ()=>{ S.mode = S.mode==="sentence"?"line":"sentence"; S.adj={}; S.merges=[]; S.scores={}; rebuild(); save(); idx=0; renderList(); renderMode(); show(); };
+$("weakOnly").onclick = ()=>{ weakOnly=!weakOnly; $("weakOnly").classList.toggle("on",weakOnly); renderList();
+  if(weakOnly && !(S.scores[idx]<80)){ const n=segs.findIndex((_,i)=>S.scores[i]!=null&&S.scores[i]<80); if(n>=0) jump(n); } };
+document.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>{
+  const [which,d]=b.dataset.n.split(","); const a=S.adj[idx]||[0,0];
+  if(which==="s"){ a[0]+=+d; segs[idx].start=Math.max(0,segs[idx].start+ +d); } else { a[1]+=+d; segs[idx].end+= +d; }
+  S.adj[idx]=a; save(); $("range").textContent=`${fmt(segs[idx].start)} – ${fmt(segs[idx].end)}`; playSeg();
+});
+$("mergeNext").onclick = ()=>{
+  if(!segs[idx+1]) return;
+  S.merges.push(idx); S.adj={};
+  const sc={}; Object.entries(S.scores).forEach(([k,v])=>{ k=+k; if(k<idx) sc[k]=v; else if(k>idx+1) sc[k-1]=v; }); S.scores=sc;
+  rebuild(); save(); renderList(); show(); playSeg();
+};
+$("answer").addEventListener("keydown", e=>{
+  if(e.isComposing) return;
+  if(e.key==="Enter"){ e.preventDefault(); checked ? go(1) : check(); }
+});
+document.addEventListener("keydown", e=>{
+  if($("practice").hidden) return;
+  if(e.key==="Escape"){ e.preventDefault(); playSeg(); }
+  if(e.altKey && e.key==="ArrowDown"){ e.preventDefault(); go(1); }
+  if(e.altKey && e.key==="ArrowUp"){ e.preventDefault(); go(-1); }
+});
+
+showSetup();
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
